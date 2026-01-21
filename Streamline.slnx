@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Streamline.App/Streamline.App.csproj" />
+  <Project Path="Streamline.Core/Streamline.Core.csproj" />
+  <Project Path="Streamline.Infrastructure/Streamline.Infrastructure.csproj" />
+</Solution>

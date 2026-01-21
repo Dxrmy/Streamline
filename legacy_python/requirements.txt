@@ -1,0 +1,6 @@
+beautifulsoup4
+lxml
+google-generativeai
+requests
+python-telegram-bot
+apscheduler

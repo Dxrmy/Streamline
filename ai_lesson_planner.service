@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Lesson Planner Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/ai_lesson_planner
+ExecStart=/home/pi/ai_lesson_planner/venv/bin/python run.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

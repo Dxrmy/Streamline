@@ -1,0 +1,10 @@
+﻿@bin/
+obj/
+publish/
+.vs/
+*.log
+.playwright/
+*.pdf
+*.exe
+*.dll
+*.pdb
