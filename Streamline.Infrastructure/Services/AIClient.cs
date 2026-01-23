@@ -42,41 +42,7 @@ namespace Streamline.Infrastructure.Services
         {
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
 
-            var parts = new JArray();
-            parts.Add(new JObject { ["text"] = prompt });
-
-            foreach (var item in filePaths)
-            {
-                // Check if it's a valid file path AND the file exists
-                bool isFile = false;
-                try 
-                {
-                    if (item.Length < 255 && System.IO.File.Exists(item)) isFile = true;
-                }
-                catch { } // Not a file path
-
-                if (isFile)
-                {
-                    var content = await System.IO.File.ReadAllTextAsync(item);
-                    parts.Add(new JObject { ["text"] = $"\n--- FILE: {System.IO.Path.GetFileName(item)} ---\n{content}" });
-                }
-                else
-                {
-                    // Treat as raw context string
-                    parts.Add(new JObject { ["text"] = $"\n--- CONTEXT ---\n{item}" });
-                }
-            }
-
-            var payload = new JObject
-            {
-                ["contents"] = new JArray
-                {
-                    new JObject { ["parts"] = parts }
-                }
-            };
-
-            var json = payload.ToString();
-            var contentHttp = new StringContent(json, Encoding.UTF8, "application/json");
+            var contentHttp = new JsonStreamContent(prompt, filePaths);
 
             try
             {
@@ -92,6 +58,87 @@ namespace Streamline.Infrastructure.Services
             {
                 _logger.LogError($"AI Generation Error: {ex.Message}");
                 return $"Error generating content: {ex.Message}";
+            }
+        }
+
+        private class JsonStreamContent : HttpContent
+        {
+            private readonly string _prompt;
+            private readonly List<string> _filePaths;
+
+            public JsonStreamContent(string prompt, List<string> filePaths)
+            {
+                _prompt = prompt;
+                _filePaths = filePaths;
+                Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json")
+                {
+                    CharSet = "utf-8"
+                };
+            }
+
+            protected override async Task SerializeToStreamAsync(System.IO.Stream stream, System.Net.TransportContext? context)
+            {
+                using var streamWriter = new System.IO.StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true);
+                using var writer = new JsonTextWriter(streamWriter) { Formatting = Formatting.None };
+
+                await writer.WriteStartObjectAsync();
+                await writer.WritePropertyNameAsync("contents");
+                await writer.WriteStartArrayAsync();
+
+                await writer.WriteStartObjectAsync();
+                await writer.WritePropertyNameAsync("parts");
+                await writer.WriteStartArrayAsync();
+
+                // Prompt
+                await writer.WriteStartObjectAsync();
+                await writer.WritePropertyNameAsync("text");
+                await writer.WriteValueAsync(_prompt);
+                await writer.WriteEndObjectAsync();
+
+                foreach (var item in _filePaths)
+                {
+                    bool isFile = false;
+                    try
+                    {
+                        if (item.Length < 255 && System.IO.File.Exists(item)) isFile = true;
+                    }
+                    catch { }
+
+                    await writer.WriteStartObjectAsync();
+                    await writer.WritePropertyNameAsync("text");
+
+                    if (isFile)
+                    {
+                        // Header part
+                        await writer.WriteValueAsync($"\n--- FILE: {System.IO.Path.GetFileName(item)} ---\n");
+                        await writer.WriteEndObjectAsync();
+
+                        // Content part
+                        var content = await System.IO.File.ReadAllTextAsync(item);
+                        await writer.WriteStartObjectAsync();
+                        await writer.WritePropertyNameAsync("text");
+                        await writer.WriteValueAsync(content);
+                    }
+                    else
+                    {
+                        await writer.WriteValueAsync($"\n--- CONTEXT ---\n{item}");
+                    }
+
+                    await writer.WriteEndObjectAsync();
+                }
+
+                await writer.WriteEndArrayAsync();
+                await writer.WriteEndObjectAsync();
+                await writer.WriteEndArrayAsync();
+                await writer.WriteEndObjectAsync();
+
+                await writer.FlushAsync();
+            }
+
+            protected override bool TryComputeLength(out long length)
+            {
+                length = -1;
+                return false;
             }
         }
     }
