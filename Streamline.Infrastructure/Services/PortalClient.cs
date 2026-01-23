@@ -121,23 +121,20 @@ namespace Streamline.Infrastructure.Services
             await _page.GotoAsync(targetUrl);
             await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-            // Find all class rows
-            var rows = await _page.QuerySelectorAllAsync("tr.clickable");
-            _logger.LogInformation($"Found {rows.Count} classes.");
+            // Use Locators for stability and speed (lazy evaluation)
+            var rowsLocator = _page.Locator("tr.clickable");
+            var rowCount = await rowsLocator.CountAsync();
+            _logger.LogInformation($"Found {rowCount} classes.");
 
-            // We must re-query rows inside the loop because navigation invalidates handles
-            for (int i = 0; i < rows.Count; i++)
+            for (int i = 0; i < rowCount; i++)
             {
-                // re-query to get fresh handle
-                var freshRows = await _page.QuerySelectorAllAsync("tr.clickable");
-                if (i >= freshRows.Count) break;
-                var row = freshRows[i];
+                var row = rowsLocator.Nth(i);
 
-                var cells = await row.QuerySelectorAllAsync("td");
-                if (cells.Count < 2) continue;
+                var cells = row.Locator("td");
+                if (await cells.CountAsync() < 2) continue;
 
-                var time = await cells[0].InnerTextAsync();
-                var name = await cells[1].InnerTextAsync();
+                var time = await cells.Nth(0).InnerTextAsync();
+                var name = await cells.Nth(1).InnerTextAsync();
                 var className = $"{time.Trim()} {name.Trim()}";
 
                 _logger.LogInformation($"Processing Class: {className}");
@@ -152,10 +149,19 @@ namespace Streamline.Infrastructure.Services
 
                 // Click to enter class
                 await row.ClickAsync();
-                await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+                // Optimized Wait: Wait for specific element instead of generic NetworkIdle (which waits 500ms)
+                try
+                {
+                    await _page.WaitForSelectorAsync("a[href*='/assess-by-member/']", new PageWaitForSelectorOptions { Timeout = 3000 });
+                }
+                catch
+                {
+                    // Fallback if no students
+                    await _page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                }
 
                 // --- 1. Parse Register (Student Progress) ---
-                // Selector: a[href*='/assess-by-member/']
                 var studentLinks = await _page.QuerySelectorAllAsync("a[href*='/assess-by-member/']");
                 
                 foreach (var link in studentLinks)
@@ -167,9 +173,7 @@ namespace Streamline.Infrastructure.Services
                     var progress = percentageSpan != null ? await percentageSpan.InnerTextAsync() : "0%";
                     
                     var fullText = await titleDiv.InnerTextAsync();
-                    // Clean name: "John Doe 50%" -> "John Doe"
                     var studentName = fullText.Replace(progress, "").Trim();
-                    // Clean stage info: "John Doe (Stage 2)" -> "John Doe"
                     if (studentName.Contains("(")) 
                         studentName = studentName.Split('(')[0].Trim();
 
@@ -179,7 +183,7 @@ namespace Streamline.Infrastructure.Services
                         Student = student,
                         ClassSession = session,
                         Progress = progress,
-                        Status = "Present" // Assumed if extracting
+                        Status = "Present"
                     };
                     session.Snapshots.Add(snapshot);
                 }
@@ -187,14 +191,17 @@ namespace Streamline.Infrastructure.Services
                 // --- 2. Parse Skills (Click "Skills" tab) ---
                 try 
                 {
-                    // Try to find a tab with text "Skills" or similar
                     var tabs = await _page.GetByText("Skills").AllAsync();
                     if (tabs.Count > 0)
                     {
                         await tabs.First().ClickAsync();
-                        await _page.WaitForTimeoutAsync(1000); // UI animation wait
+                        // Optimized Wait: Wait for content to appear instead of hard sleep
+                        try {
+                            await _page.WaitForSelectorAsync("div.v-list-group", new PageWaitForSelectorOptions { Timeout = 2000 });
+                        } catch {
+                            // If no groups appear, maybe empty or animation finished differently
+                        }
 
-                        // Parse Groups: div.v-list-group
                         var skillGroups = await _page.QuerySelectorAllAsync("div.v-list-group");
                         foreach (var group in skillGroups)
                         {
@@ -202,7 +209,6 @@ namespace Streamline.Infrastructure.Services
                             if (groupTitleElem == null) continue;
                             var groupTitle = (await groupTitleElem.InnerTextAsync()).Trim();
 
-                            // Find students in this group: div[role='listitem']
                             var studentRows = await group.QuerySelectorAllAsync("div[role='listitem']");
                             foreach (var sRow in studentRows)
                             {
@@ -214,13 +220,9 @@ namespace Streamline.Infrastructure.Services
                                 var activeBtn = await sRow.QuerySelectorAsync("button.v-item--active");
                                 var status = activeBtn != null ? await activeBtn.InnerTextAsync() : "Not Assessed";
 
-                                // Find the snapshot and add skill
                                 var snapshot = session.Snapshots.FirstOrDefault(s => s.Student.Name == sName);
                                 if (snapshot != null)
                                 {
-                                    // Append to generic "Notes" or similar field since we don't have a child entity for skills yet
-                                    // Or just log it. For the prompt, we need it.
-                                    // Storing in a formatted string in the snapshot for now
                                     snapshot.Notes += $"[{groupTitle}: {status}] ";
                                 }
                             }
@@ -236,7 +238,8 @@ namespace Streamline.Infrastructure.Services
 
                 // Navigate Back
                 await _page.GoBackAsync();
-                await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                // Optimized Wait: Wait for list to be ready
+                await rowsLocator.First.WaitForAsync();
             }
             
             return batch;
