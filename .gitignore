@@ -1,4 +1,4 @@
-﻿@bin/
+bin/
 obj/
 publish/
 .vs/
@@ -8,3 +8,4 @@ publish/
 *.exe
 *.dll
 *.pdb
+BenchmarkDotNet.Artifacts/
