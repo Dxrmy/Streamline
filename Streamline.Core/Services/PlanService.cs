@@ -35,7 +35,7 @@ namespace Streamline.Core.Services
             var batch = await _portal.ScrapeDayAsync(date);
             
             // 2. Generate Logic
-            string finalReport = "";
+            var finalReport = new System.Text.StringBuilder();
 
             foreach (var session in batch.Sessions)
             {
@@ -63,10 +63,10 @@ namespace Streamline.Core.Services
                 plan.DocxPath = docPath;
                 plan.IsBeautified = true;
 
-                finalReport += $"Generated: {docPath}\n";
+                finalReport.AppendLine($"Generated: {docPath}");
             }
 
-            return finalReport;
+            return finalReport.ToString();
         }
 
         private string FormatSessionForAI(ClassSession session)
